@@ -13,6 +13,8 @@ from sklearn.metrics import classification_report, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
+from typing import Dict, List
+
 warnings.filterwarnings('ignore')
 
 class MLDiagnosticClassifier:
@@ -144,6 +146,8 @@ class MLDiagnosticClassifier:
         if not self.is_trained:
             self.train(verbose=False)
 
+        symptoms = [s.lower() for s in symptoms]
+
         features = np.array([
             [1 if s in symptoms else 0
              for s in self.SYMPTOM_FEATURES]
@@ -179,6 +183,15 @@ class MLDiagnosticClassifier:
             self.train(verbose=False)
 
         y_pred = self.best_model.predict(self._X_test)
+        print("\nClassification Report")
+        print("="*50)
+        print(
+            classification_report(
+                self._y_test,
+                y_pred,
+                target_names=self.label_encoder.classes_
+            )
+        )
         cm     = confusion_matrix(self._y_test, y_pred)
         labels = self.label_encoder.classes_
 

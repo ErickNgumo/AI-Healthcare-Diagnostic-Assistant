@@ -3,110 +3,135 @@
 # Covers: Week 5 (First-Order Logic & Inference)
 # ============================================================
 
-from typing import Set, List, Dict, Tuple, Optional
+"""Rule-based medical reasoning used by the diagnostic agent.
+
+This module is an educational demonstration of first-order-style rules and
+certainty factors.  Its results are decision support, not a clinical diagnosis.
+"""
+
+from typing import Dict, Iterable, List, Optional, Set, Tuple
+
+
+Rule = Tuple[List[str], str, float]
+
 
 class MedicalKnowledgeBase:
-    """
-    First-Order Logic based medical knowledge base.
-    Supports forward chaining, backward chaining,
-    and confidence-weighted inference.
-    """
+    """Medical facts, rules, and forward/backward inference methods."""
 
     def __init__(self):
-        self.facts:  Set[str]             = set()
-        self.rules:  List[Tuple]          = []
+        self.facts: Set[str] = set()
+        self.rules: List[Rule] = []
         self.certainty_factors: Dict[str, float] = {}
         self._load_medical_knowledge()
 
-    def _load_medical_knowledge(self):
-        """Load domain medical knowledge"""
-        # ── Symptom Facts (loaded dynamically per patient) ──
-        # ── Disease Rules ──
-        disease_rules = [
-            # (conditions,              conclusion,       certainty)
-            (["fever", "cough", "fatigue"],
-             "flu_suspected",                             0.75),
-            (["fever", "cough", "loss_of_smell", "fatigue"],
-             "covid19_suspected",                         0.85),
-            (["fever", "rash", "joint_pain"],
-             "dengue_suspected",                          0.80),
-            (["chest_pain", "shortness_of_breath", "sweating"],
-             "cardiac_event_suspected",                   0.90),
-            (["headache", "stiff_neck", "high_fever", "light_sensitivity"],
-             "meningitis_suspected",                      0.88),
-            (["cough", "weight_loss", "night_sweats", "fatigue"],
-             "tuberculosis_suspected",                    0.82),
-            (["frequent_urination", "excessive_thirst", "blurred_vision"],
-             "diabetes_suspected",                        0.78),
-            (["flu_suspected", "high_fever"],
-             "flu_confirmed",                             0.85),
-            (["covid19_suspected", "positive_pcr"],
-             "covid19_confirmed",                         0.99),
-            (["cardiac_event_suspected", "elevated_troponin"],
-             "myocardial_infarction",                     0.95),
-            # Urgency rules
-            (["myocardial_infarction"],
-             "EMERGENCY",                                 1.00),
-            (["meningitis_suspected"],
-             "EMERGENCY",                                 0.95),
-            (["covid19_confirmed"],
-             "ISOLATE_AND_TREAT",                         0.99),
-            (["flu_confirmed"],
-             "REST_AND_MEDICATE",                         0.90),
+    @staticmethod
+    def _normalise_fact(fact: str) -> str:
+        """Convert user-facing symptom text to the rule vocabulary."""
+        if not isinstance(fact, str):
+            raise TypeError("Facts and symptoms must be strings.")
+        return "_".join(fact.strip().lower().replace("-", " ").split())
+
+    @staticmethod
+    def _validate_certainty(certainty: float) -> float:
+        try:
+            certainty = float(certainty)
+        except (TypeError, ValueError) as exc:
+            raise TypeError("Certainty factors must be numeric.") from exc
+        if not 0.0 <= certainty <= 1.0:
+            raise ValueError("Certainty factors must be between 0.0 and 1.0.")
+        return certainty
+
+    def _load_medical_knowledge(self) -> None:
+        """Load the domain rules supplied in the capstone lab manual."""
+        disease_rules: List[Rule] = [
+            (["fever", "cough", "fatigue"], "flu_suspected", 0.75),
+            (["fever", "cough", "loss_of_smell", "fatigue"], "covid19_suspected", 0.85),
+            (["fever", "rash", "joint_pain"], "dengue_suspected", 0.80),
+            (["chest_pain", "shortness_of_breath", "sweating"], "cardiac_event_suspected", 0.90),
+            (["headache", "stiff_neck", "high_fever", "light_sensitivity"], "meningitis_suspected", 0.88),
+            (["cough", "weight_loss", "night_sweats", "fatigue"], "tuberculosis_suspected", 0.82),
+            (["frequent_urination", "excessive_thirst", "blurred_vision"], "diabetes_suspected", 0.78),
+            (["flu_suspected", "high_fever"], "flu_confirmed", 0.85),
+            (["covid19_suspected", "positive_pcr"], "covid19_confirmed", 0.99),
+            (["cardiac_event_suspected", "elevated_troponin"], "myocardial_infarction", 0.95),
+            (["myocardial_infarction"], "emergency", 1.00),
+            (["meningitis_suspected"], "emergency", 0.95),
+            (["covid19_confirmed"], "isolate_and_treat", 0.99),
+            (["flu_confirmed"], "rest_and_medicate", 0.90),
         ]
-        for conditions, conclusion, cf in disease_rules:
-            self.add_rule(conditions, conclusion, cf)
+        for conditions, conclusion, certainty in disease_rules:
+            self.add_rule(conditions, conclusion, certainty)
 
-    def add_fact(self, fact: str, certainty: float = 1.0):
+    def add_fact(self, fact: str, certainty: float = 1.0) -> None:
+        """Store a fact, retaining the strongest available certainty factor."""
+        fact = self._normalise_fact(fact)
+        certainty = self._validate_certainty(certainty)
         self.facts.add(fact)
-        self.certainty_factors[fact] = certainty
+        self.certainty_factors[fact] = max(
+            certainty, self.certainty_factors.get(fact, 0.0)
+        )
 
-    def add_rule(self, conditions: List[str],
-                 conclusion: str, certainty: float = 1.0):
-        self.rules.append((conditions, conclusion, certainty))
+    def add_rule(
+        self, conditions: Iterable[str], conclusion: str, certainty: float = 1.0
+    ) -> None:
+        """Store a rule as ``conditions -> conclusion`` with a certainty factor."""
+        conditions = [self._normalise_fact(condition) for condition in conditions]
+        if not conditions:
+            raise ValueError("A rule must have at least one condition.")
+        self.rules.append(
+            (conditions, self._normalise_fact(conclusion), self._validate_certainty(certainty))
+        )
 
-    def load_patient_symptoms(self, symptoms: List[str]):
-        """Load patient symptoms as facts"""
+    def load_patient_symptoms(self, symptoms: Iterable[str]) -> None:
+        """Load observed symptoms as certain facts after normalising their names."""
+        if symptoms is None:
+            raise TypeError("Symptoms must be an iterable of strings.")
         for symptom in symptoms:
-            self.add_fact(symptom.lower().replace(' ', '_'))
+            self.add_fact(symptom)
 
     def forward_chain(self, verbose: bool = False) -> Dict[str, float]:
-        """Forward chaining with certainty factors"""
-        inferred = {}
-        changed  = True
+        """Infer all reachable conclusions using certainty-factor propagation.
+
+        A rule fires when all of its conditions are known.  The conclusion CF is
+        ``rule CF × min(condition CFs)``, exactly as specified in the lab manual.
+        Conclusions become facts so that multi-step rules can fire in later loops.
+        """
+        inferred: Dict[str, float] = {}
+        changed = True
         iteration = 0
 
         while changed:
-            changed   = False
+            changed = False
             iteration += 1
             for conditions, conclusion, rule_cf in self.rules:
-                all_known = all(
-                    c in self.facts or c in inferred for c in conditions
-                )
-                if all_known and conclusion not in inferred:
-                    # Combine certainty factors
-                    cond_cfs = [
-                        self.certainty_factors.get(c,
-                            inferred.get(c, 1.0))
-                        for c in conditions
-                    ]
-                    combined_cf = rule_cf * min(cond_cfs)
-                    inferred[conclusion] = round(combined_cf, 4)
+                if not all(condition in self.facts for condition in conditions):
+                    continue
 
-                    if verbose:
-                        cond_str = " ∧ ".join(conditions)
-                        print(f"  Iter {iteration}: "
-                              f"{cond_str} → {conclusion} "
-                              f"(CF={combined_cf:.3f})")
-                    changed = True
+                combined_cf = round(
+                    rule_cf * min(self.certainty_factors[condition] for condition in conditions),
+                    4,
+                )
+                previous_cf = self.certainty_factors.get(conclusion, 0.0)
+                if conclusion in self.facts and combined_cf <= previous_cf:
+                    continue
+
+                self.add_fact(conclusion, combined_cf)
+                inferred[conclusion] = self.certainty_factors[conclusion]
+                if verbose:
+                    print(
+                        f"  Iter {iteration}: {' ∧ '.join(conditions)} → "
+                        f"{conclusion} (CF={combined_cf:.3f})"
+                    )
+                changed = True
         return inferred
 
-    def backward_chain(self, goal: str,
-                       visited: Optional[Set] = None,
-                       depth: int = 0) -> Tuple[bool, float]:
-        """Backward chaining — prove a goal"""
-        indent  = "  " * depth
-        visited = visited or set()
+    def backward_chain(
+        self, goal: str, visited: Optional[Set[str]] = None, depth: int = 0
+    ) -> Tuple[bool, float]:
+        """Recursively prove a goal and return its best supporting certainty."""
+        del depth  # Kept for compatibility with the lab's recursive signature.
+        goal = self._normalise_fact(goal)
+        visited = set() if visited is None else set(visited)
 
         if goal in self.facts:
             return True, self.certainty_factors.get(goal, 1.0)
@@ -114,48 +139,59 @@ class MedicalKnowledgeBase:
             return False, 0.0
         visited.add(goal)
 
+        best_cf = 0.0
         for conditions, conclusion, rule_cf in self.rules:
-            if conclusion == goal:
-                results = [
-                    self.backward_chain(c, visited.copy(), depth+1)
-                    for c in conditions
-                ]
-                if all(proved for proved, _ in results):
-                    cf = rule_cf * min(cf for _, cf in results)
-                    return True, round(cf, 4)
-        return False, 0.0
+            if conclusion != goal:
+                continue
+            # Each condition receives its own visited set.  A fact explored on
+            # one branch must not prevent an independent sibling branch from
+            # proving that same fact.
+            results = [
+                self.backward_chain(condition, visited.copy())
+                for condition in conditions
+            ]
+            if all(proved for proved, _ in results):
+                best_cf = max(best_cf, round(rule_cf * min(cf for _, cf in results), 4))
+        return (best_cf > 0.0), best_cf
 
     def analyze(self, percept) -> Dict:
-        """Module interface for the agent"""
-        self.facts = set()
-        self.certainty_factors = {}
+        """Apply the knowledge base to the agent's ``PatientPercept`` interface."""
+        if not hasattr(percept, "symptoms"):
+            raise TypeError("analyze() expects a patient percept with symptoms.")
+
+        self.facts.clear()
+        self.certainty_factors.clear()
         self.load_patient_symptoms(percept.symptoms)
 
-        # Add vitals as facts
-        if percept.temperature > 38.0:
-            self.add_fact("fever",
-                min(1.0, (percept.temperature - 37.0) / 3.0))
-        if percept.temperature > 39.5:
-            self.add_fact("high_fever", 1.0)
-        if percept.heart_rate > 100:
-            self.add_fact("tachycardia", 1.0)
+        temperature = getattr(percept, "temperature", None)
+        if temperature is not None and temperature > 38.0:
+            self.add_fact("fever", min(1.0, (float(temperature) - 37.0) / 3.0))
+        if temperature is not None and temperature > 39.5:
+            self.add_fact("high_fever")
+
+        heart_rate = getattr(percept, "heart_rate", None)
+        if heart_rate is not None and heart_rate > 100:
+            self.add_fact("tachycardia")
 
         inferred = self.forward_chain()
-        diseases  = {k: v for k, v in inferred.items()
-                     if 'suspected' in k or 'confirmed' in k}
+        diagnoses = {
+            fact: certainty
+            for fact, certainty in inferred.items()
+            if fact.endswith("_suspected") or fact.endswith("_confirmed")
+        }
+        diagnosis = max(diagnoses, key=diagnoses.get) if diagnoses else "Unknown"
 
-        top = max(diseases, key=diseases.get) if diseases else "Unknown"
         return {
-            'summary':    f"Inferred {len(inferred)} conclusions",
-            'diagnosis':  top,
-            'confidence': diseases.get(top, 0.5),
-            'all_inferred': inferred
+            "summary": f"Inferred {len(inferred)} conclusions",
+            "diagnosis": diagnosis,
+            "confidence": diagnoses.get(diagnosis, 0.5),
+            "all_inferred": inferred,
         }
 
     def get_explanation(self, diagnosis: str) -> str:
-        """Explain how a diagnosis was reached"""
-        for conditions, conclusion, cf in self.rules:
+        """Return the rule used to derive a diagnosis, if one exists."""
+        diagnosis = self._normalise_fact(diagnosis)
+        for conditions, conclusion, certainty in self.rules:
             if conclusion == diagnosis:
-                return (f"'{diagnosis}' derived from: "
-                        f"{' + '.join(conditions)} (CF={cf})")
+                return f"'{diagnosis}' derived from: {' + '.join(conditions)} (CF={certainty})"
         return f"'{diagnosis}' is a base fact"

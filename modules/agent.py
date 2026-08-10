@@ -68,7 +68,7 @@ class HealthcareDiagnosticAgent:
     def register_module(self, name: str, module):
         """Plug in AI sub-modules (KB, Bayes, ML, etc.)"""
         self._modules[name] = module
-        print(f"  🔌 Module registered: [{name}]")
+        print(f"  Module registered: [{name}]")
 
     def perceive(self, percept: PatientPercept):
         """Step 1: Perceive the environment."""
@@ -225,27 +225,27 @@ class HealthcareDiagnosticAgent:
     def _generate_recommendations(self, urgency: str, results: Dict) -> List[str]:
         if urgency == "CRITICAL":
             recommendations = [
-                "🚨 Immediate emergency consultation required",
-                "📞 Alert the attending physician immediately",
-                "🏥 Transfer to emergency or intensive monitoring if needed",
+                "Immediate emergency consultation required",
+                "Alert the attending physician immediately",
+                "Transfer to emergency or intensive monitoring if needed",
             ]
         elif urgency == "HIGH":
             recommendations = [
-                "⚠️ Schedule an urgent medical review within 24 hours",
-                "🧪 Order relevant diagnostic testing and monitoring",
-                "📋 Continue close observation of vital signs",
+                "Schedule an urgent medical review within 24 hours",
+                "Order relevant diagnostic testing and monitoring",
+                "Continue close observation of vital signs",
             ]
         elif urgency == "MEDIUM":
             recommendations = [
-                "📅 Schedule a follow-up within 3 days",
-                "🌡️ Monitor temperature and symptoms daily",
-                "💧 Maintain hydration and rest",
+                "Schedule a follow-up within 3 days",
+                "Monitor temperature and symptoms daily",
+                "Maintain hydration and rest",
             ]
         else:
             recommendations = [
-                "🏠 Home rest and hydration are appropriate",
-                "📱 Follow up if symptoms worsen or new signs develop",
-                "📋 Continue general wellness monitoring",
+                "Home rest and hydration are appropriate",
+                "Follow up if symptoms worsen or new signs develop",
+                "Continue general wellness monitoring",
             ]
 
         planner = self._modules.get('TreatmentPlanner')
@@ -274,7 +274,7 @@ class HealthcareDiagnosticAgent:
         self.memory.action_log.append(entry)
 
     def print_log(self):
-        print("\n📋 Agent Action Log:")
+        print("\nAgent Action Log:")
         print("─" * 50)
         for entry in self.memory.action_log:
             print(f"  {entry}")
@@ -285,4 +285,3 @@ class HealthcareDiagnosticAgent:
             'performance_score': self.performance_score,
             'diagnoses_made': len(self.memory.diagnosis_history),
         }
-

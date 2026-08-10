@@ -33,7 +33,7 @@ def banner():
     print(f"""
 {C.BOLD}{C.BLUE}
 ╔══════════════════════════════════════════════════════════╗
-║        🏥 INTELLIGENT HEALTHCARE DIAGNOSTIC AI           ║
+║          INTELLIGENT HEALTHCARE DIAGNOSTIC AI            ║
 ║         Introduction to AI — Capstone Project            ║
 ║  Modules: Agents | Logic | Bayes | ML | DNN | Fuzzy      ║
 ╚══════════════════════════════════════════════════════════╝
@@ -48,7 +48,7 @@ def section(title: str):
 
 def build_system() -> HealthcareDiagnosticAgent:
     """Instantiate and wire all AI modules to the intelligent agent."""
-    section("🔧 Building AI System — Registering Modules")
+    section("Building AI System — Registering Modules")
 
     agent = HealthcareDiagnosticAgent()
     print("\n  Initializing modules...")
@@ -91,4 +91,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

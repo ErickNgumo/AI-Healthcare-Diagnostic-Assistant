@@ -3,204 +3,237 @@
 # Covers: Week 10 (Neural Networks)
 # ============================================================
 
+"""TensorFlow/Keras diagnostic classifier using the project's symptom schema."""
+
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Tuple, Union
+
+import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras import layers, models, callbacks
-import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from tensorflow.keras import callbacks, layers, models
+
 
 class NeuralDiagnosticModel:
-    """
-    Deep Neural Network for medical diagnosis.
-    Architecture: Input → Dense → BN → Dropout → Output
+    """Deep neural-network specialist used by :class:`HealthcareDiagnosticAgent`.
+
+    The model deliberately shares Module 4's generated patient records and fixed
+    18-symptom vocabulary.  Records are split into independent train, validation,
+    and test partitions before fitting, so test data is never used by Keras.
     """
 
     SYMPTOM_FEATURES = [
-        'fever', 'cough', 'fatigue', 'headache',
-        'body_aches', 'loss_of_smell', 'chest_pain',
-        'rash', 'joint_pain', 'shortness_of_breath',
-        'sweating', 'frequent_urination', 'excessive_thirst',
-        'blurred_vision', 'night_sweats', 'weight_loss',
-        'stiff_neck', 'light_sensitivity'
+        'fever', 'cough', 'fatigue', 'headache', 'body_aches',
+        'loss_of_smell', 'chest_pain', 'rash', 'joint_pain',
+        'shortness_of_breath', 'sweating', 'frequent_urination',
+        'excessive_thirst', 'blurred_vision', 'night_sweats',
+        'weight_loss', 'stiff_neck', 'light_sensitivity',
     ]
-
     DISEASE_LABELS = [
-        'flu', 'covid19', 'dengue', 'cardiac_event',
-        'diabetes', 'common_cold', 'tuberculosis', 'meningitis'
+        'flu', 'covid19', 'dengue', 'cardiac_event', 'diabetes',
+        'common_cold', 'tuberculosis', 'meningitis',
     ]
+    # Kept in sync with Module 4's synthetic data-generation probabilities.
+    DISEASE_PROFILES = {
+        'flu': {'fever': .90, 'cough': .85, 'fatigue': .88, 'headache': .70,
+                'body_aches': .80, 'loss_of_smell': .20},
+        'covid19': {'fever': .88, 'cough': .80, 'fatigue': .90,
+                    'loss_of_smell': .85, 'headache': .65, 'body_aches': .60},
+        'dengue': {'fever': .98, 'rash': .75, 'joint_pain': .85,
+                   'headache': .90, 'fatigue': .80, 'body_aches': .88},
+        'cardiac_event': {'chest_pain': .92, 'shortness_of_breath': .88,
+                          'fatigue': .70, 'sweating': .75, 'headache': .30},
+        'diabetes': {'fatigue': .82, 'frequent_urination': .95,
+                     'excessive_thirst': .92, 'blurred_vision': .70,
+                     'weight_loss': .50},
+        'common_cold': {'cough': .90, 'fever': .50, 'headache': .60,
+                        'fatigue': .55, 'body_aches': .50},
+        'tuberculosis': {'cough': .95, 'weight_loss': .85, 'night_sweats': .80,
+                         'fatigue': .88, 'fever': .70},
+        'meningitis': {'headache': .95, 'stiff_neck': .90, 'fever': .92,
+                      'light_sensitivity': .85, 'fatigue': .80},
+    }
 
-    def __init__(self):
-        self.model      = None
-        self.history    = None
+    def __init__(self, random_state: int = 42):
+        self.random_state = random_state
+        self.model: Optional[tf.keras.Model] = None
+        self.history: Optional[tf.keras.callbacks.History] = None
         self.is_trained = False
+        self.X_train = self.y_train = None
+        self.X_val = self.y_val = None
+        self.X_test = self.y_test = None
         self._build_model()
 
-    def _build_model(self):
-        """Build deep MLP architecture"""
-        n_inputs  = len(self.SYMPTOM_FEATURES)
-        n_outputs = len(self.DISEASE_LABELS)
-
+    def _build_model(self) -> None:
+        """Build the 18 → 128 → 64 → 32 → 8 lab-specified MLP."""
+        tf.keras.utils.set_random_seed(self.random_state)
         self.model = models.Sequential([
-            layers.Input(shape=(n_inputs,)),
-
-            # Block 1
+            layers.Input(shape=(len(self.SYMPTOM_FEATURES),)),
             layers.Dense(128, activation='relu',
                          kernel_regularizer=tf.keras.regularizers.l2(0.001)),
             layers.BatchNormalization(),
-            layers.Dropout(0.3),
-
-            # Block 2
+            layers.Dropout(0.30),
             layers.Dense(64, activation='relu',
                          kernel_regularizer=tf.keras.regularizers.l2(0.001)),
             layers.BatchNormalization(),
-            layers.Dropout(0.2),
-
-            # Block 3
+            layers.Dropout(0.20),
             layers.Dense(32, activation='relu'),
             layers.BatchNormalization(),
-
-            # Output
-            layers.Dense(n_outputs, activation='softmax')
+            layers.Dense(len(self.DISEASE_LABELS), activation='softmax'),
         ], name='MedicalDNN')
-
         self.model.compile(
             optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-            loss='sparse_categorical_crossentropy',
-            metrics=['accuracy']
+            loss='sparse_categorical_crossentropy', metrics=['accuracy'],
         )
 
-    def _generate_data(self, n: int = 3000):
-        """Generate synthetic training data"""
-        from sklearn.preprocessing import LabelEncoder
-        np.random.seed(42)
+    def _generate_data(self, n: int = 3000) -> Tuple[np.ndarray, np.ndarray]:
+        """Generate records with Module 4's established feature conventions."""
+        if n < len(self.DISEASE_LABELS):
+            raise ValueError(f"n must be at least {len(self.DISEASE_LABELS)}.")
+        rng = np.random.default_rng(self.random_state)
+        samples_per_class = n // len(self.DISEASE_LABELS)
+        rows, labels = [], []
+        for label_index, disease in enumerate(self.DISEASE_LABELS):
+            probabilities = self.DISEASE_PROFILES[disease]
+            for _ in range(samples_per_class):
+                row = np.asarray([
+                    float(rng.random() < probabilities.get(feature, .05))
+                    for feature in self.SYMPTOM_FEATURES
+                ], dtype=np.float32)
+                rows.append(row)
+                labels.append(label_index)
+        indices = rng.permutation(len(rows))
+        X = np.asarray(rows, dtype=np.float32)[indices]
+        y = np.asarray(labels, dtype=np.int64)[indices]
+        return X, y
 
-        profiles = {
-            'flu':           {'fever':0.90,'cough':0.85,'fatigue':0.88,
-                              'headache':0.70,'body_aches':0.80},
-            'covid19':       {'fever':0.88,'cough':0.80,'fatigue':0.90,
-                              'loss_of_smell':0.85,'headache':0.65},
-            'dengue':        {'fever':0.98,'rash':0.75,'joint_pain':0.85,
-                              'headache':0.90,'fatigue':0.80},
-            'cardiac_event': {'chest_pain':0.92,'shortness_of_breath':0.88,
-                              'sweating':0.75,'fatigue':0.70},
-            'diabetes':      {'fatigue':0.82,'frequent_urination':0.95,
-                              'excessive_thirst':0.92,'blurred_vision':0.70},
-            'common_cold':   {'cough':0.90,'fever':0.50,'headache':0.60,
-                              'fatigue':0.55},
-            'tuberculosis':  {'cough':0.95,'weight_loss':0.85,'night_sweats':0.80,
-                              'fatigue':0.88,'fever':0.70},
-            'meningitis':    {'headache':0.95,'stiff_neck':0.90,'fever':0.92,
-                              'light_sensitivity':0.85},
+    def prepare_data(self, n_samples: int = 3000) -> Tuple[np.ndarray, ...]:
+        """Create stratified 60%/20%/20% train/validation/test partitions."""
+        X, y = self._generate_data(n_samples)
+        X_train, X_holdout, y_train, y_holdout = train_test_split(
+            X, y, test_size=0.40, random_state=self.random_state, stratify=y,
+        )
+        X_val, X_test, y_val, y_test = train_test_split(
+            X_holdout, y_holdout, test_size=0.50,
+            random_state=self.random_state, stratify=y_holdout,
+        )
+        self.X_train, self.y_train = X_train, y_train
+        self.X_val, self.y_val = X_val, y_val
+        self.X_test, self.y_test = X_test, y_test
+        return X_train, X_val, X_test, y_train, y_val, y_test
+
+    def train(self, epochs: int = 50, verbose: int = 1,
+              n_samples: int = 3000, batch_size: int = 64) -> Dict:
+        """Fit with validation-only callbacks; retain the untouched test partition."""
+        if epochs < 1:
+            raise ValueError('epochs must be at least 1.')
+        self.prepare_data(n_samples)
+        callback_list = [
+            callbacks.EarlyStopping(monitor='val_accuracy', patience=10,
+                                    restore_best_weights=True),
+            callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5,
+                                        patience=5, min_lr=1e-6),
+        ]
+        self.history = self.model.fit(
+            self.X_train, self.y_train, validation_data=(self.X_val, self.y_val),
+            epochs=epochs, batch_size=batch_size, callbacks=callback_list,
+            verbose=verbose,
+        )
+        self.is_trained = True
+        return {
+            'val_accuracy': float(max(self.history.history['val_accuracy'])),
+            'epochs_trained': len(self.history.history['loss']),
+            'train_size': len(self.y_train), 'validation_size': len(self.y_val),
+            'test_size': len(self.y_test),
         }
 
-        X_list, y_list = [], []
-        n_per = n // len(profiles)
+    @staticmethod
+    def _normalise_symptom(symptom: object) -> str:
+        return str(symptom).strip().lower().replace(' ', '_').replace('-', '_')
 
-        for label_idx, (disease, probs) in enumerate(profiles.items()):
-            for _ in range(n_per):
-                row = np.array([
-                    1 if (np.random.random() <
-                          probs.get(feat, 0.03)) else 0
-                    for feat in self.SYMPTOM_FEATURES
-                ], dtype=np.float32)
-                X_list.append(row)
-                y_list.append(label_idx)
-
-        X = np.array(X_list)
-        y = np.array(y_list)
-        idx = np.random.permutation(len(X))
-        return X[idx], y[idx]
-
-    def train(self, epochs: int = 50, verbose: int = 1) -> Dict:
-        """Train the neural network"""
-        X, y = self._generate_data(3000)
-        split = int(0.8 * len(X))
-        X_train, X_val = X[:split], X[split:]
-        y_train, y_val = y[:split], y[split:]
-
-        cb_list = [
-            callbacks.EarlyStopping(
-                monitor='val_accuracy', patience=10,
-                restore_best_weights=True),
-            callbacks.ReduceLROnPlateau(
-                monitor='val_loss', factor=0.5,
-                patience=5, min_lr=1e-6)
-        ]
-
-        print("=" * 55)
-        print("  Neural Network — Medical Diagnosis Training")
-        print(f"  Architecture: {len(self.SYMPTOM_FEATURES)} → "
-              f"128 → 64 → 32 → {len(self.DISEASE_LABELS)}")
-        print("=" * 55)
-        self.model.summary()
-
-        self.history = self.model.fit(
-            X_train, y_train,
-            validation_data=(X_val, y_val),
-            epochs=epochs, batch_size=64,
-            callbacks=cb_list, verbose=verbose
+    def _symptoms_to_features(self, symptoms: Sequence[str]) -> np.ndarray:
+        if isinstance(symptoms, (str, bytes)) or not isinstance(symptoms, Sequence):
+            raise TypeError('symptoms must be a sequence of symptom strings.')
+        supplied = {self._normalise_symptom(symptom) for symptom in symptoms}
+        return np.asarray(
+            [[float(feature in supplied) for feature in self.SYMPTOM_FEATURES]],
+            dtype=np.float32,
         )
 
-        val_acc = max(self.history.history['val_accuracy'])
-        self.is_trained = True
-        print(f"\n✅ Best Validation Accuracy: {val_acc:.4f}")
-        return {'val_accuracy': val_acc}
-
-    def predict(self, symptoms: List[str]) -> Dict:
-        """Predict from symptom list"""
+    def predict(self, symptoms: Sequence[str]) -> Dict:
+        """Return the softmax diagnosis and its genuine probability distribution."""
         if not self.is_trained:
             self.train(verbose=0)
-
-        features = np.array([
-            [1.0 if feat in [s.lower().replace(' ','_')
-                             for s in symptoms]
-             else 0.0
-             for feat in self.SYMPTOM_FEATURES]
-        ], dtype=np.float32)
-
-        proba     = self.model.predict(features, verbose=0)[0]
-        pred_idx  = np.argmax(proba)
-        diagnosis = self.DISEASE_LABELS[pred_idx]
-
+        features = self._symptoms_to_features(symptoms)
+        probabilities = self.model.predict(features, verbose=0)[0]
+        prediction_index = int(np.argmax(probabilities))
+        probability_map = {
+            label: float(probability)
+            for label, probability in zip(self.DISEASE_LABELS, probabilities)
+        }
         return {
-            'diagnosis':  diagnosis,
-            'confidence': round(float(proba[pred_idx]), 4),
-            'all_probs':  dict(zip(self.DISEASE_LABELS,
-                                   proba.round(4).tolist()))
+            'diagnosis': self.DISEASE_LABELS[prediction_index],
+            'confidence': float(probabilities[prediction_index]),
+            'all_probs': probability_map,
+            'symptom_vector': features[0].tolist(),
         }
 
-    def analyze(self, percept) -> Dict:
-        """Module interface for the agent"""
-        result = self.predict(percept.symptoms)
-        result['summary'] = (f"DNN: {result['diagnosis']} "
-                             f"({result['confidence']:.2%})")
+    def analyze(self, patient_percept) -> Dict:
+        """Agent-compatible diagnostic entry point accepting ``PatientPercept``."""
+        if not hasattr(patient_percept, 'symptoms'):
+            raise TypeError('analyze() expects an object with a symptoms attribute.')
+        result = self.predict(patient_percept.symptoms)
+        result['summary'] = f"DNN: {result['diagnosis']} ({result['confidence']:.2%})"
         return result
 
-    def plot_training(self):
-        """Plot training history"""
-        if not self.history:
-            print("Train model first!")
-            return
+    def evaluate(self, output_dir: Optional[Union[str, Path]] = None,
+                 generate_plots: bool = False) -> Dict:
+        """Calculate held-out test metrics from real predictions and softmax scores."""
+        if not self.is_trained:
+            self.train(verbose=0)
+        probabilities = self.model.predict(self.X_test, verbose=0)
+        predictions = np.argmax(probabilities, axis=1)
+        from evaluation.metrics import calculate_metrics
 
-        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-        metrics = [('accuracy', 'val_accuracy', 'Accuracy'),
-                   ('loss',     'val_loss',     'Loss')]
-        colors  = [('#3498db','#e74c3c'), ('#2ecc71','#e67e22')]
+        result = calculate_metrics(
+            self.y_test, predictions, probabilities, self.DISEASE_LABELS,
+        )
+        if generate_plots:
+            self.plot_evaluation(output_dir=output_dir)
+        return result
 
-        for ax, (train_m, val_m, title), (tc, vc) in zip(
-                axes, metrics, colors):
-            ax.plot(self.history.history[train_m],
-                    color=tc, linewidth=2, label='Train')
-            ax.plot(self.history.history[val_m],
-                    color=vc, linewidth=2,
-                    linestyle='--', label='Validation')
-            ax.set_title(f"Model {title}",
-                         fontsize=13, fontweight='bold')
-            ax.set_xlabel("Epoch")
-            ax.set_ylabel(title)
-            ax.legend(); ax.grid(True, alpha=0.3)
+    def plot_training(self, output_dir: Union[str, Path] = 'reports') -> Path:
+        """Save actual training/validation accuracy and loss curves."""
+        if self.history is None:
+            raise RuntimeError('Train the model before plotting its history.')
+        destination = Path(output_dir)
+        destination.mkdir(parents=True, exist_ok=True)
+        figure, axes = plt.subplots(1, 2, figsize=(14, 5))
+        for axis, metric, title in (
+            (axes[0], 'accuracy', 'Accuracy'), (axes[1], 'loss', 'Loss'),
+        ):
+            axis.plot(self.history.history[metric], label='Training')
+            axis.plot(self.history.history[f'val_{metric}'], label='Validation')
+            axis.set(title=f'Model {title}', xlabel='Epoch', ylabel=title)
+            axis.grid(alpha=0.3)
+            axis.legend()
+        figure.suptitle('Neural Network Training Curves')
+        figure.tight_layout()
+        path = destination / 'nn_training.png'
+        figure.savefig(path, dpi=150, bbox_inches='tight')
+        plt.close(figure)
+        return path
 
-        plt.suptitle("Neural Network Training Curves",
-                     fontsize=14, fontweight='bold')
-        plt.tight_layout()
-        plt.savefig("nn_training.png", dpi=150)
-        plt.show()
+    def plot_evaluation(self, output_dir: Union[str, Path] = 'reports') -> Path:
+        """Save the confusion matrix calculated from held-out test predictions."""
+        if not self.is_trained:
+            self.train(verbose=0)
+        probabilities = self.model.predict(self.X_test, verbose=0)
+        from evaluation.visualizations import plot_confusion_matrix
+
+        return plot_confusion_matrix(
+            self.y_test, np.argmax(probabilities, axis=1), self.DISEASE_LABELS,
+            title='Deep Neural Network Confusion Matrix', output_dir=output_dir,
+            filename='nn_confusion_matrix.png',
+        )

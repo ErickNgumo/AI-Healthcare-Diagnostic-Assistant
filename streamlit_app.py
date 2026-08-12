@@ -93,7 +93,6 @@ def render_report(report, agent):
 
 st.set_page_config(page_title='Healthcare Diagnostic Assistant', layout='wide')
 st.title('Intelligent Healthcare Diagnostic Assistant')
-st.warning('Academic AI demonstration only. This system is not a medical device and does not replace professional medical diagnosis or treatment.')
 
 with st.form('patient_form'):
     col1, col2 = st.columns(2)
